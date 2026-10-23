@@ -10,20 +10,66 @@
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
-// Chat models are tried in order until one answers — Google retires
-// and renames models over time, and a fresh API key may not have
-// access to every name. A 404 ("model not found") simply moves on to
-// the next candidate instead of failing the chat. GEMINI_CHAT_MODEL
-// in .env, when set, is tried first.
-const CHAT_MODEL_CANDIDATES = [
-  process.env.GEMINI_CHAT_MODEL,
+// Static chat-model guesses, tried only if model discovery (below)
+// finds nothing. Google retires and renames models over time, so
+// these are a last resort, not the plan.
+const STATIC_CHAT_FALLBACKS = [
   "gemini-flash-latest",
   "gemini-2.5-flash",
   "gemini-2.5-flash-lite",
   "gemini-2.0-flash",
   "gemini-1.5-flash",
-].filter((m, i, arr) => m && arr.indexOf(m) === i);
+];
 let workingChatModel = null;
+let chatCandidatesCache = null;
+
+// Asks the Gemini API itself which models THIS key can actually use
+// for generateContent (the ListModels call Google recommends in its
+// own 404 message). Names that merely "should" exist kept failing —
+// the key's real catalog is the ground truth. Flash models are
+// preferred (fast, free-tier friendly), then Pro, then anything
+// else; embedding/image/video-only models are excluded.
+async function discoverChatModels() {
+  try {
+    const res = await fetch(`${API_BASE}/models?pageSize=1000`, {
+      headers: { "x-goog-api-key": process.env.GEMINI_API_KEY },
+    });
+    if (!res.ok) return [];
+    const data = await res.json();
+    const usable = (data.models || [])
+      .filter((m) =>
+        (m.supportedGenerationMethods || []).includes("generateContent")
+      )
+      .map((m) => (m.name || "").replace(/^models\//, ""))
+      .filter(
+        (name) =>
+          name &&
+          !/embedding|aqa|imagen|veo|tts|image|robotics|computer-use/i.test(name)
+      );
+    const rank = (n) => (/flash/i.test(n) ? 0 : /pro/i.test(n) ? 1 : 2);
+    usable.sort((a, b) => rank(a) - rank(b));
+    if (usable.length > 0) {
+      console.log(
+        `[gemini] chat models available on this key: ${usable.slice(0, 6).join(", ")}`
+      );
+    }
+    return usable;
+  } catch {
+    return []; // discovery is best-effort; static fallbacks remain
+  }
+}
+
+async function getChatModelCandidates() {
+  if (chatCandidatesCache) return chatCandidatesCache;
+  const discovered = await discoverChatModels();
+  const merged = [
+    process.env.GEMINI_CHAT_MODEL,
+    ...discovered,
+    ...STATIC_CHAT_FALLBACKS,
+  ].filter((m, i, arr) => m && arr.indexOf(m) === i);
+  chatCandidatesCache = merged;
+  return merged;
+}
 const OUTPUT_DIMENSIONS = 768;
 const BATCH_SIZE = 50; // requests per batchEmbedContents call
 
@@ -191,7 +237,7 @@ export async function generateAnswer(question, contexts) {
 
   const candidates = workingChatModel
     ? [workingChatModel]
-    : CHAT_MODEL_CANDIDATES;
+    : await getChatModelCandidates();
 
   let lastError = null;
   for (const model of candidates) {
