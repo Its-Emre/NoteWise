@@ -122,7 +122,7 @@ async function geminiPost(model, action, body, attempt = 0) {
   // Hard timeout: without one, a stalled connection to Google leaves
   // the chat hanging on "reading your notes..." forever. A stall
   // becomes a clear, reportable error instead.
-  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || 20000;
+  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || 30000;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -140,13 +140,17 @@ async function geminiPost(model, action, body, attempt = 0) {
     });
   } catch (error) {
     if (error.name === "AbortError") {
-      throw new Error(
+      const err = new Error(
         "Gemini took too long to respond (timeout). Check the internet/VPN connection and try again."
       );
+      err.code = "GEMINI_TIMEOUT";
+      throw err;
     }
-    throw new Error(
+    const err = new Error(
       "Could not reach Gemini (network error). Check the internet/VPN connection and try again."
     );
+    err.code = "GEMINI_NETWORK";
+    throw err;
   } finally {
     clearTimeout(timer);
   }
@@ -245,9 +249,12 @@ export async function generateAnswer(question, contexts) {
     generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
   };
 
-  const candidates = workingChatModel
+  const allCandidates = workingChatModel
     ? [workingChatModel]
     : await getChatModelCandidates();
+  // Cap the attempts so one bad night at Google can't keep the user
+  // waiting through the whole catalog.
+  const candidates = allCandidates.slice(0, 4);
 
   let lastError = null;
   for (const model of candidates) {
@@ -266,10 +273,21 @@ export async function generateAnswer(question, contexts) {
       return text;
     } catch (error) {
       lastError = error;
-      // 404 → this model isn't available on this key.
-      // 503 → this model is overloaded at Google right now.
-      // Either way: fall through to the next candidate.
-      if (error.status !== 404 && error.status !== 503) throw error;
+      // Fall through to the next candidate on anything model- or
+      // transport-specific: 404 (not available on this key), 503
+      // (overloaded), 429 (this model's quota), timeouts and network
+      // stalls. One model hanging must not kill the whole chat —
+      // the next one may answer in two seconds.
+      const fallthrough =
+        error.status === 404 ||
+        error.status === 503 ||
+        error.status === 429 ||
+        error.code === "GEMINI_TIMEOUT" ||
+        error.code === "GEMINI_NETWORK";
+      if (!fallthrough) throw error;
+      console.log(
+        `[gemini] ${model} failed (${error.status || error.code || "error"}) — trying next model`
+      );
       if (workingChatModel === model) workingChatModel = null;
     }
   }
