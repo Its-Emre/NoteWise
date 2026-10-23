@@ -58,5 +58,6 @@ export const api = {
   uploadDocument: (formData) => requestForm("/documents", formData),
   getDocuments: () => request("/documents"),
   getDocument: (id) => request(`/documents/${id}`),
+  indexDocument: (id) => request(`/documents/${id}/index`, { method: "POST" }),
   deleteDocument: (id) => request(`/documents/${id}`, { method: "DELETE" }),
 };

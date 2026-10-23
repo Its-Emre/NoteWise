@@ -2,7 +2,7 @@
 
 An AI study assistant built on **RAG (Retrieval-Augmented Generation)**: upload your study PDFs — lecture notes, textbook chapters, previous-year papers — and ask questions. Answers come from *your* material, with sources, instead of a model's general knowledge.
 
-> **Status:** Sprint 1 complete — project setup, authentication, and PDF upload with text extraction. The RAG engine (chunking, embeddings, chat) lands in Sprints 2–3.
+> **Status:** Sprint 2 complete — the RAG engine: documents are chunked, embedded with Google Gemini and stored as vectors in MongoDB, and a retrieval endpoint returns the most relevant chunks for any question. The chat UI lands in Sprint 3.
 
 ## Features
 
@@ -12,8 +12,13 @@ An AI study assistant built on **RAG (Retrieval-Augmented Generation)**: upload 
 - Personal document library with per-document status (processing / ready / failed) and readable explanations when a PDF can't be read (e.g. scanned images)
 - A dark, premium UI: sidebar app shell, landing page, document cards
 
+**Sprint 2 (current)**
+- Everything in Sprint 1, plus the RAG engine:
+- Uploaded documents are split into overlapping chunks (~900 characters, 150 overlap) and embedded with **Google Gemini** (`gemini-embedding-001`, 768 dimensions, retrieval task types)
+- Chunks + vectors are stored in MongoDB; the Library shows each document's chunk count, or an **Enable AI search** button to index it
+- `POST /api/retrieve` embeds a question and returns the top matching chunks, ranked by **cosine similarity computed in the backend** — the retrieval core the chat is built on
+
 **Planned**
-- Chunking + Gemini embeddings stored in MongoDB; vector retrieval by cosine similarity (Sprint 2)
 - Chat UI with grounded answers and source citations (Sprint 3)
 - Deployment on Vercel + Render (Sprint 4)
 
@@ -35,7 +40,7 @@ You need Node.js and a MongoDB Atlas connection string.
 ```bash
 # 1. Backend
 cd server
-cp .env.example .env   # fill in MONGO_URI and JWT_SECRET
+cp .env.example .env   # fill in MONGO_URI, JWT_SECRET and GEMINI_API_KEY (free from Google AI Studio)
 npm install
 npm run dev            # http://localhost:5000 — check /api/health
 

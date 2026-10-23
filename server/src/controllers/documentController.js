@@ -1,5 +1,7 @@
 import Document from "../models/Document.js";
+import Chunk from "../models/Chunk.js";
 import { extractPdfText } from "../utils/extractPdfText.js";
+import { indexDocument } from "../services/indexer.js";
 
 // POST /api/documents — protected. Multipart form, field name "file".
 // Extracts the PDF's text and stores it on the document. The response
@@ -37,8 +39,44 @@ export const uploadDocument = async (req, res) => {
 
     await doc.save();
 
+    // Sprint 2: if the text was read, try to index it for AI search
+    // right away (chunk + embed). Failure never fails the upload —
+    // the document simply stays "not indexed" with a reason, and the
+    // user can retry from the Library.
+    if (doc.status === "ready") {
+      await indexDocument(doc);
+    }
+
     const { text, ...summary } = doc.toObject();
     res.status(201).json(summary);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+// POST /api/documents/:id/index — protected, owner only.
+// (Re)builds the document's chunks + embeddings so it can be searched
+// and chatted with.
+export const indexMyDocument = async (req, res) => {
+  try {
+    const doc = await Document.findById(req.params.id);
+    if (!doc) return res.status(404).json({ message: "Document not found" });
+
+    if (doc.owner.toString() !== req.user._id.toString()) {
+      return res
+        .status(403)
+        .json({ message: "You can only index your own documents" });
+    }
+    if (doc.status !== "ready") {
+      return res
+        .status(400)
+        .json({ message: "Only successfully read documents can be indexed" });
+    }
+
+    await indexDocument(doc);
+
+    const { text, ...summary } = doc.toObject();
+    res.json(summary);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -88,6 +126,7 @@ export const deleteDocument = async (req, res) => {
         .json({ message: "You can only delete your own documents" });
     }
 
+    await Chunk.deleteMany({ document: doc._id });
     await doc.deleteOne();
     res.json({ message: "Document deleted" });
   } catch (error) {

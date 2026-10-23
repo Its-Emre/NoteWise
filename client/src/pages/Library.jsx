@@ -37,6 +37,7 @@ export default function Library() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
+  const [indexingId, setIndexingId] = useState(null);
   const fileInputRef = useRef(null);
 
   const loadDocuments = async () => {
@@ -69,6 +70,20 @@ export default function Library() {
       setUploadError(err.message);
     } finally {
       setUploading(false);
+    }
+  };
+
+  const handleIndex = async (doc) => {
+    setIndexingId(doc._id);
+    try {
+      const updated = await api.indexDocument(doc._id);
+      setDocuments((docs) =>
+        docs.map((d) => (d._id === updated._id ? { ...d, ...updated } : d))
+      );
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setIndexingId(null);
     }
   };
 
@@ -214,6 +229,30 @@ export default function Library() {
                     {doc.error}
                   </p>
                 )}
+
+                {doc.status === "ready" &&
+                  (doc.indexed ? (
+                    <p className="mt-3 text-xs font-medium text-emerald-300">
+                      🧠 {doc.chunkCount} chunks · AI ready
+                    </p>
+                  ) : (
+                    <div className="mt-3">
+                      <button
+                        onClick={() => handleIndex(doc)}
+                        disabled={indexingId === doc._id}
+                        className="rounded-lg border border-emerald-500/50 px-3 py-1.5 text-xs font-semibold text-emerald-300 transition hover:bg-emerald-500/10 disabled:opacity-60"
+                      >
+                        {indexingId === doc._id
+                          ? "Indexing... (AI is reading)"
+                          : "✨ Enable AI search"}
+                      </button>
+                      {doc.indexError && (
+                        <p className="mt-2 text-xs text-amber-300">
+                          {doc.indexError}
+                        </p>
+                      )}
+                    </div>
+                  ))}
 
                 <div className="mt-4 flex items-center justify-between border-t border-ink-700/60 pt-3">
                   <span className="text-xs text-slate-500">

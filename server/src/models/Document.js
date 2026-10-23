@@ -14,6 +14,12 @@ const documentSchema = new mongoose.Schema(
     sizeBytes: { type: Number, required: true },
     pageCount: { type: Number, default: 0 },
     charCount: { type: Number, default: 0 },
+    // Sprint 2 (RAG indexing): how many chunks the text was split into,
+    // whether embeddings exist for this document, and — if indexing
+    // failed — a user-readable reason.
+    chunkCount: { type: Number, default: 0 },
+    indexed: { type: Boolean, default: false },
+    indexError: { type: String, default: "" },
     // Full extracted text. Excluded from list responses (can be large).
     text: { type: String, default: "" },
     status: {
