@@ -10,7 +10,20 @@
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 const EMBED_MODEL = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
-const CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || "gemini-2.5-flash";
+// Chat models are tried in order until one answers — Google retires
+// and renames models over time, and a fresh API key may not have
+// access to every name. A 404 ("model not found") simply moves on to
+// the next candidate instead of failing the chat. GEMINI_CHAT_MODEL
+// in .env, when set, is tried first.
+const CHAT_MODEL_CANDIDATES = [
+  process.env.GEMINI_CHAT_MODEL,
+  "gemini-flash-latest",
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-2.0-flash",
+  "gemini-1.5-flash",
+].filter((m, i, arr) => m && arr.indexOf(m) === i);
+let workingChatModel = null;
 const OUTPUT_DIMENSIONS = 768;
 const BATCH_SIZE = 50; // requests per batchEmbedContents call
 
@@ -27,7 +40,21 @@ function friendlyGeminiError(status, detail) {
       "Gemini free quota reached for now. Please try again in a little while."
     );
   }
-  return new Error(`Gemini API error (${status}). Please try again.`);
+  if (status === 404) {
+    // Include Google's own reason (usually "model not found") so the
+    // failure is self-diagnosing instead of a bare number.
+    let reason = "";
+    try {
+      reason = JSON.parse(detail)?.error?.message || "";
+    } catch {
+      reason = "";
+    }
+    return new Error(
+      `Gemini API error (404)${reason ? `: ${reason.slice(0, 140)}` : ""}`
+    );
+  }
+  const err = new Error(`Gemini API error (${status}). Please try again.`);
+  return err;
 }
 
 async function geminiPost(model, action, body) {
@@ -42,7 +69,9 @@ async function geminiPost(model, action, body) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw friendlyGeminiError(res.status, detail);
+    const err = friendlyGeminiError(res.status, detail);
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -108,23 +137,45 @@ export function buildAnswerPrompt(question, contexts) {
 }
 
 // contexts: [{ documentName, text }] — the retrieved chunks.
+// Tries the candidate chat models in order; a 404 means "this key
+// can't use that model", so we fall through to the next one and
+// remember whichever worked for the rest of the server's run.
 export async function generateAnswer(question, contexts) {
   requireKey();
-  const data = await geminiPost(CHAT_MODEL, "generateContent", {
+
+  const body = {
     systemInstruction: { parts: [{ text: ANSWER_SYSTEM_INSTRUCTION }] },
     contents: [
       { role: "user", parts: [{ text: buildAnswerPrompt(question, contexts) }] },
     ],
     generationConfig: { temperature: 0.3, maxOutputTokens: 1024 },
-  });
+  };
 
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  const text = parts
-    .map((p) => p.text || "")
-    .join("")
-    .trim();
-  if (!text) {
-    throw new Error("Gemini returned an empty answer. Please try again.");
+  const candidates = workingChatModel
+    ? [workingChatModel]
+    : CHAT_MODEL_CANDIDATES;
+
+  let lastError = null;
+  for (const model of candidates) {
+    try {
+      const data = await geminiPost(model, "generateContent", body);
+      const parts = data?.candidates?.[0]?.content?.parts || [];
+      const text = parts
+        .map((p) => p.text || "")
+        .join("")
+        .trim();
+      if (!text) {
+        throw new Error("Gemini returned an empty answer. Please try again.");
+      }
+      workingChatModel = model;
+      return text;
+    } catch (error) {
+      lastError = error;
+      if (error.status !== 404) throw error;
+      // 404 → this model isn't available on this key; try the next.
+      if (workingChatModel === model) workingChatModel = null;
+    }
   }
-  return text;
+
+  throw lastError || new Error("No Gemini chat model is available on this API key.");
 }
