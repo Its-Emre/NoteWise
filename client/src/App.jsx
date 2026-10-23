@@ -5,6 +5,7 @@ import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Library from "./pages/Library";
+import Chat from "./pages/Chat";
 
 export default function App() {
   const { user, loading } = useAuth();
@@ -30,6 +31,18 @@ export default function App() {
             </AppShell>
           ) : (
             <Landing />
+          )
+        }
+      />
+      <Route
+        path="/chat"
+        element={
+          user ? (
+            <AppShell>
+              <Chat />
+            </AppShell>
+          ) : (
+            <Navigate to="/login" replace />
           )
         }
       />

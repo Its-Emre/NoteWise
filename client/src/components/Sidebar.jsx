@@ -51,7 +51,7 @@ export default function Sidebar() {
         <NavItem to="/" icon="📚">
           My Library
         </NavItem>
-        <NavItem icon="💬" soon>
+        <NavItem to="/chat" icon="💬">
           Chat
         </NavItem>
       </nav>
