@@ -24,10 +24,16 @@ export const chat = async (req, res) => {
     }
 
     const cleanQuestion = question.trim();
+    console.log(`[chat] question: "${cleanQuestion.slice(0, 60)}"`);
     const { totalChunks, results } = await retrieveChunks(req.user._id, cleanQuestion, {
       documentIds,
       topK: 5,
     });
+    console.log(
+      `[chat] retrieved ${results.length} chunks (of ${totalChunks}), top score ${
+        results.length ? results[0].score : "n/a"
+      }`
+    );
 
     if (totalChunks === 0) {
       return res.status(400).json({

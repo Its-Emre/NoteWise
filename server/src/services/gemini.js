@@ -58,14 +58,37 @@ function friendlyGeminiError(status, detail) {
 }
 
 async function geminiPost(model, action, body) {
-  const res = await fetch(`${API_BASE}/models/${model}:${action}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-goog-api-key": process.env.GEMINI_API_KEY,
-    },
-    body: JSON.stringify(body),
-  });
+  // Hard timeout: without one, a stalled connection to Google leaves
+  // the chat hanging on "reading your notes..." forever. A stall
+  // becomes a clear, reportable error instead.
+  const timeoutMs = Number(process.env.GEMINI_TIMEOUT_MS) || 20000;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  let res;
+  try {
+    console.log(`[gemini] ${action} via ${model}...`);
+    res = await fetch(`${API_BASE}/models/${model}:${action}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": process.env.GEMINI_API_KEY,
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(
+        "Gemini took too long to respond (timeout). Check the internet/VPN connection and try again."
+      );
+    }
+    throw new Error(
+      "Could not reach Gemini (network error). Check the internet/VPN connection and try again."
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
@@ -168,6 +191,7 @@ export async function generateAnswer(question, contexts) {
         throw new Error("Gemini returned an empty answer. Please try again.");
       }
       workingChatModel = model;
+      console.log(`[gemini] answered via ${model}`);
       return text;
     } catch (error) {
       lastError = error;
