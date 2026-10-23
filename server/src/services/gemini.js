@@ -40,6 +40,11 @@ function friendlyGeminiError(status, detail) {
       "Gemini free quota reached for now. Please try again in a little while."
     );
   }
+  if (status === 503) {
+    return new Error(
+      "Gemini is overloaded right now (that's on Google's side, not yours). Please try again in a few seconds."
+    );
+  }
   if (status === 404) {
     // Include Google's own reason (usually "model not found") so the
     // failure is self-diagnosing instead of a bare number.
@@ -57,7 +62,7 @@ function friendlyGeminiError(status, detail) {
   return err;
 }
 
-async function geminiPost(model, action, body) {
+async function geminiPost(model, action, body, attempt = 0) {
   // Hard timeout: without one, a stalled connection to Google leaves
   // the chat hanging on "reading your notes..." forever. A stall
   // becomes a clear, reportable error instead.
@@ -92,6 +97,15 @@ async function geminiPost(model, action, body) {
 
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
+    // 503/500 from Google usually means "model overloaded" — a
+    // transient condition. Wait briefly and retry the same call once
+    // before giving up (the chat layer may still fall through to
+    // another model afterwards).
+    if ((res.status === 503 || res.status === 500) && attempt < 1) {
+      console.log(`[gemini] ${model} returned ${res.status} — retrying once...`);
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      return geminiPost(model, action, body, attempt + 1);
+    }
     const err = friendlyGeminiError(res.status, detail);
     err.status = res.status;
     throw err;
@@ -160,9 +174,10 @@ export function buildAnswerPrompt(question, contexts) {
 }
 
 // contexts: [{ documentName, text }] — the retrieved chunks.
-// Tries the candidate chat models in order; a 404 means "this key
-// can't use that model", so we fall through to the next one and
-// remember whichever worked for the rest of the server's run.
+// Tries the candidate chat models in order; a 404 (model not
+// available on this key) or a 503 (model overloaded at Google) falls
+// through to the next candidate, and whichever model worked is
+// remembered for the rest of the server's run.
 export async function generateAnswer(question, contexts) {
   requireKey();
 
@@ -195,8 +210,10 @@ export async function generateAnswer(question, contexts) {
       return text;
     } catch (error) {
       lastError = error;
-      if (error.status !== 404) throw error;
-      // 404 → this model isn't available on this key; try the next.
+      // 404 → this model isn't available on this key.
+      // 503 → this model is overloaded at Google right now.
+      // Either way: fall through to the next candidate.
+      if (error.status !== 404 && error.status !== 503) throw error;
       if (workingChatModel === model) workingChatModel = null;
     }
   }
