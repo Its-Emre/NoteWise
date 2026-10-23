@@ -31,9 +31,19 @@ let chatCandidatesCache = null;
 // else; embedding/image/video-only models are excluded.
 async function discoverChatModels() {
   try {
-    const res = await fetch(`${API_BASE}/models?pageSize=1000`, {
-      headers: { "x-goog-api-key": process.env.GEMINI_API_KEY },
-    });
+    // Bounded like every other Gemini call — discovery must never be
+    // the thing that hangs a chat.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+    let res;
+    try {
+      res = await fetch(`${API_BASE}/models?pageSize=1000`, {
+        headers: { "x-goog-api-key": process.env.GEMINI_API_KEY },
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
     if (!res.ok) return [];
     const data = await res.json();
     const usable = (data.models || [])

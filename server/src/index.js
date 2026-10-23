@@ -1,7 +1,14 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import dns from "node:dns";
 import connectDB from "./config/db.js";
+
+// Some home networks (notably in India) hand out IPv6 routes that
+// silently blackhole: browsers cope via happy-eyeballs, but Node's
+// fetch can stall for a long time trying IPv6 first when reaching
+// Google APIs. Prefer IPv4 — same destination, the reliable road.
+dns.setDefaultResultOrder("ipv4first");
 import authRoutes from "./routes/authRoutes.js";
 import documentRoutes from "./routes/documentRoutes.js";
 import retrieveRoutes from "./routes/retrieveRoutes.js";
