@@ -2,7 +2,14 @@
 
 An AI study assistant built on **RAG (Retrieval-Augmented Generation)**: upload your study PDFs — lecture notes, textbook chapters, previous-year papers — and ask questions. Answers come from *your* material, with sources, instead of a model's general knowledge.
 
-> **Status:** Sprint 3 complete — the full RAG chat: ask a question and NoteWise retrieves the best chunks from your own PDFs and answers from them with Gemini Flash, showing its sources. Deployment (Vercel + Render) is Sprint 4.
+> **Status:** ✅ **Live and deployed** — the full RAG pipeline (upload → chunk → embed → retrieve → grounded answer with sources) running in production.
+
+## 🔗 Live demo
+
+- **App:** https://note-wise-two.vercel.app
+- **API:** https://notewise-6e2w.onrender.com/api/health
+
+> Free-tier note: the API sleeps after ~15 minutes idle, so the first request can take up to a minute to wake it.
 
 ## Features
 
@@ -24,8 +31,10 @@ An AI study assistant built on **RAG (Retrieval-Augmented Generation)**: upload 
 - Every answer shows its **source documents**; if your notes don't cover the question, NoteWise says so honestly instead of inventing an answer
 - `POST /api/chat` — retrieval + generation in one call
 
-**Planned**
-- Deployment on Vercel + Render (Sprint 4)
+**Sprint 4 (current)**
+- Everything in Sprints 1–3, deployed live:
+- Frontend on **Vercel**, API on **Render**, same MongoDB Atlas database
+- Production wiring: environment-based API URL, locked-down CORS, and a self-healing Gemini model layer (auto-discovers the API key's available models, retries overloads, falls through across models with a 30s timeout) so chat survives free-tier flakiness
 
 ## Tech stack
 
